@@ -1,4 +1,11 @@
-export const ANALYSIS_VERSION = 1;
+/** Measurement pipeline. Bump this to rebuild every saved photo on next open. */
+export const ANALYSIS_VERSION = 2;
+
+/**
+ * Shape of the record stored in IndexedDB.
+ * Older records are kept and migrated; photos are not deleted.
+ */
+export const SCHEMA_VERSION = 2;
 
 export type Angle = "front" | "left" | "right";
 
@@ -65,8 +72,13 @@ export interface AnalyzedFeature {
   friendly: string;
   detail: string;
   confidence: number;
+  /** Pose-normalized landmark coordinates, [x0, y0, x1, y1, ...], compared with Procrustes. */
+  shape: number[];
+  /** Short scale-free ratios. Not the main signal. */
   geometry: number[];
+  /** L2-normalized DINOv2 embedding of the lighting-normalized crop. */
   appearance: number[];
+  /** Fourier magnitudes of an ear outline, when there is one. */
   contour: number[];
   cropBlob: Blob;
   cropWidth: number;
@@ -97,12 +109,16 @@ export interface Person {
   name: string;
   relationship: string;
   createdAt: number;
+  /** Missing on records saved before schema versions existed. */
+  schemaVersion?: number;
   photos: Partial<Record<Angle, StoredPhoto>>;
 }
 
 export interface DetectedFace {
   landmarks: { x: number; y: number; z: number }[];
   blendshapes: Record<string, number>;
+  /** Column-major 4×4 head pose, when the landmarker provided one. */
+  matrix: number[] | null;
 }
 
 export function uid(): string {

@@ -18,7 +18,7 @@ export function subscribeModel(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-function emit(progress: ModelProgress) {
+export function reportProgress(progress: ModelProgress) {
   lastProgress = progress;
   for (const listener of listeners) listener(progress);
 }
@@ -34,23 +34,23 @@ export function getLandmarker(): Promise<FaceLandmarkerType> {
 }
 
 async function createLandmarker(): Promise<FaceLandmarkerType> {
-  emit({ ratio: 0.08, label: "Loading face tools…" });
+  reportProgress({ ratio: 0.04, label: "Loading face tools…" });
   const vision = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}wasm`);
-  emit({ ratio: 0.22, label: "Loading the face model…" });
+  reportProgress({ ratio: 0.12, label: "Loading the face model…" });
   const model = await fetchBuffer(`${import.meta.env.BASE_URL}models/face_landmarker.task`, (ratio) => {
-    emit({ ratio: 0.22 + ratio * 0.68, label: "Loading the face model…" });
+    reportProgress({ ratio: 0.12 + ratio * 0.28, label: "Loading the face model…" });
   });
-  emit({ ratio: 0.94, label: "Getting ready…" });
+  reportProgress({ ratio: 0.42, label: "Getting ready…" });
   const landmarker = await FaceLandmarker.createFromOptions(vision, {
     baseOptions: { modelAssetBuffer: model, delegate: "CPU" },
     runningMode: "IMAGE",
     numFaces: 3,
     outputFaceBlendshapes: true,
-    outputFacialTransformationMatrixes: false,
+    outputFacialTransformationMatrixes: true,
     minFaceDetectionConfidence: 0.4,
     minFacePresenceConfidence: 0.4,
   });
-  emit({ ratio: 1, label: "Ready" });
+  reportProgress({ ratio: 0.48, label: "Face tools ready" });
   return landmarker;
 }
 
@@ -61,9 +61,11 @@ export function detectFaces(landmarker: FaceLandmarkerType, canvas: HTMLCanvasEl
     for (const category of result.faceBlendshapes[index]?.categories ?? []) {
       blendshapes[category.categoryName] = category.score;
     }
+    const matrix = result.facialTransformationMatrixes?.[index];
     return {
-      landmarks: landmarks.map((landmark) => ({ x: landmark.x, y: landmark.y, z: landmark.z })),
+      landmarks: landmarks.map((landmark) => ({ x: landmark.x, y: landmark.y, z: landmark.z ?? 0 })),
       blendshapes,
+      matrix: matrix?.data ? Array.from(matrix.data) : null,
     };
   });
 }
