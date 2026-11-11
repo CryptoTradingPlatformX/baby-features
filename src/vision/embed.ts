@@ -1,6 +1,6 @@
 import { env, pipeline, RawImage, type ImageFeatureExtractionPipeline, type ProgressInfo } from "@huggingface/transformers";
 import { reportProgress } from "./engine";
-import { normalizeLighting } from "./imageutil";
+import { normalizeLighting, releaseCanvas } from "./imageutil";
 
 const MODEL_ID = "Xenova/dinov2-small";
 
@@ -50,14 +50,22 @@ export function getEmbedder(): Promise<ImageFeatureExtractionPipeline> {
 export async function embedCanvas(canvas: HTMLCanvasElement): Promise<number[]> {
   const extractor = await getEmbedder();
   const prepared = normalizeLighting(canvas);
-  const image = RawImage.fromCanvas(prepared);
-  const tensor = await extractor(image);
-  const dims = tensor.dims;
-  const data = tensor.data as Float32Array;
-  const hidden = dims[dims.length - 1] ?? data.length;
-  const vector = Array.from(data.slice(0, hidden));
-  let norm = 0;
-  for (const value of vector) norm += value * value;
-  norm = Math.sqrt(norm) || 1;
-  return vector.map((value) => value / norm);
+  try {
+    const image = RawImage.fromCanvas(prepared);
+    const tensor = await extractor(image);
+    try {
+      const dims = tensor.dims;
+      const data = tensor.data as Float32Array;
+      const hidden = dims[dims.length - 1] ?? data.length;
+      const vector = Array.from(data.subarray(0, hidden));
+      let norm = 0;
+      for (const value of vector) norm += value * value;
+      norm = Math.sqrt(norm) || 1;
+      return vector.map((value) => value / norm);
+    } finally {
+      tensor.dispose();
+    }
+  } finally {
+    if (prepared !== canvas) releaseCanvas(prepared);
+  }
 }

@@ -88,10 +88,10 @@ export function featureDistances(
   baby: { shape: number[]; appearance: number[]; contour: number[]; geometry: number[] },
   other: { shape: number[]; appearance: number[]; contour: number[]; geometry: number[] },
 ): DistanceParts | null {
-  const shape = procrustesDistance(baby.shape, other.shape);
-  const appearance = embeddingDistance(baby.appearance, other.appearance);
-  const contour = embeddingDistance(baby.contour, other.contour);
-  const ratio = ratioDistance(baby.geometry, other.geometry);
+  const shape = pair(baby.shape, other.shape, procrustesDistance);
+  const appearance = pair(baby.appearance, other.appearance, embeddingDistance);
+  const contour = pair(baby.contour, other.contour, embeddingDistance);
+  const ratio = pair(baby.geometry, other.geometry, ratioDistance);
   if (shape == null && appearance == null && contour == null && ratio == null) return null;
   return {
     shape,
@@ -100,6 +100,11 @@ export function featureDistances(
     ratio,
     combined: combine(id, { shape, appearance, contour, ratio }),
   };
+}
+
+function pair(left: number[] | null | undefined, right: number[] | null | undefined, measure: (a: number[], b: number[]) => number | null): number | null {
+  if (!Array.isArray(left) || !Array.isArray(right)) return null;
+  return measure(left, right);
 }
 
 export function combine(id: FeatureId, parts: Omit<DistanceParts, "combined">): number {

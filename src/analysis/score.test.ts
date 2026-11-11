@@ -54,6 +54,18 @@ describe("relative shares", () => {
     expect(softmax([0.05, 0.9], 0.4).reduce((sum, value) => sum + value, 0)).toBeCloseTo(1, 5);
   });
 
+  it("treats a saved feature with no shape as not comparable", () => {
+    const baby = sample({ shape: [0, 0, 1, 0, 1, 0.3, 0, 0.3], appearance: [1, 0, 0, 0, 0, 0, 0, 0] });
+    const stale = {
+      ...baby,
+      shape: undefined as unknown as number[],
+      appearance: undefined as unknown as number[],
+      geometry: undefined as unknown as number[],
+    };
+    expect(() => featureDistances("eyes", baby, stale)).not.toThrow();
+    expect(featureDistances("eyes", baby, stale)).toBeNull();
+  });
+
   it("names the signal that actually separated the pair", () => {
     const sameLook = [1, 0, 0, 0, 0, 0, 0, 0];
     const otherLook = [0, 1, 0, 0, 0, 0, 0, 0];

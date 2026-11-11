@@ -1,4 +1,4 @@
-import { Component, useState, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { CaptureScreen } from "./components/CaptureScreen";
 import { FamilyScreen } from "./components/FamilyScreen";
 import { FeatureScreen } from "./components/FeatureScreen";
@@ -28,6 +28,14 @@ function Shell() {
   const store = usePeople();
   const [screen, setScreen] = useState<Screen>({ name: "home" });
   const [confirm, setConfirm] = useState<null | { title: string; body: string; action: () => void }>(null);
+  const seenLanding = useRef(0);
+
+  useEffect(() => {
+    const landing = store.landing;
+    if (!landing || landing.id === seenLanding.current) return;
+    seenLanding.current = landing.id;
+    setScreen(landing.to === "results" && store.baby ? { name: "results" } : { name: "home" });
+  }, [store.landing, store.baby]);
 
   const person = screen.name === "capture" ? store.people.find((item) => item.id === screen.personId) : undefined;
 
@@ -45,11 +53,20 @@ function Shell() {
 
   return (
     <div className="app">
+      {store.error ? (
+        <div className="issue error retry-banner" role="status" data-testid="migration-error">
+          <p>{store.error}</p>
+          {store.canRetry ? (
+            <button className="btn secondary" type="button" data-testid="migration-retry" onClick={() => void store.rerun()} disabled={store.migration != null}>
+              Try again
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {screen.name === "home" || (screen.name === "capture" && !person) ? (
         <HomeScreen
           baby={store.baby}
           familyCount={store.family.length}
-          storageError={store.error}
           onStartBaby={startBaby}
           onFeatures={() => setScreen({ name: "features" })}
           onFamily={() => setScreen({ name: "family" })}

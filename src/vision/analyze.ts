@@ -4,7 +4,7 @@ import { measurePhoto } from "../analysis/measure";
 import { detectFaces, getLandmarker } from "./engine";
 
 export { subscribeModel } from "./engine";
-import { decodeImage, rotateScene } from "./imageutil";
+import { decodeImage, releaseCanvas, rotateScene } from "./imageutil";
 
 const SEARCH_DEGREES = [0, -15, 15, -30, 30, -45, 45, -60, 60, 90, -90];
 
@@ -27,11 +27,15 @@ export async function analyzePhotoBlob(blob: Blob, angle: Angle): Promise<{ canv
       const found = detectFaces(landmarker, rotated);
       const area = largestFaceArea(found, rotated.width, rotated.height);
       if (area > bestArea) {
+        if (chosen !== base) releaseCanvas(chosen);
         bestArea = area;
         chosen = rotated;
         faces = found;
+      } else {
+        releaseCanvas(rotated);
       }
     }
+    if (chosen !== base) releaseCanvas(base);
   }
   const analysis = await measurePhoto(chosen, faces, angle);
   return { canvas: chosen, analysis };
