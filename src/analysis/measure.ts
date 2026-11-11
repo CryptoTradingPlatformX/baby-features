@@ -31,7 +31,7 @@ import { assessRegion, expressionIssues } from "./quality";
 import { fourierMagnitudes, resampleClosed } from "./descriptors";
 import { flattenShape, undoHeadPose } from "./score";
 import { embedCanvas } from "../vision/embed";
-import { cropCanvas, flipSceneH, regionPixels, rotateScene, skinFraction } from "../vision/imageutil";
+import { cropCanvas, flipSceneH, regionPixels, releaseCanvas, rotateScene, skinFraction } from "../vision/imageutil";
 
 interface Draft {
   id: FeatureId;
@@ -99,7 +99,8 @@ export async function measurePhoto(source: HTMLCanvasElement, faces: DetectedFac
   const aligned =
     expected === "front" ? uprightByEyes(source, points) : uprightByChin(source, points);
   points = aligned.points;
-  let canvas = aligned.canvas;
+  const upright = aligned.canvas;
+  let canvas = upright;
 
   if (expected !== "front") {
     const side = expected;
@@ -112,9 +113,14 @@ export async function measurePhoto(source: HTMLCanvasElement, faces: DetectedFac
   }
 
   const canonical = undoHeadPose(face.landmarks, face.matrix);
-  const drafts = expected === "front" ? frontDrafts(canvas, points, issues, canonical) : profileDrafts(canvas, points, expected, issues);
-  const features = await finishDrafts(drafts, issues);
-  return { version: ANALYSIS_VERSION, pose, issues, features, sharpness, brightness };
+  try {
+    const drafts = expected === "front" ? frontDrafts(canvas, points, issues, canonical) : profileDrafts(canvas, points, expected, issues);
+    const features = await finishDrafts(drafts, issues);
+    return { version: ANALYSIS_VERSION, pose, issues, features, sharpness, brightness };
+  } finally {
+    releaseCanvas(canvas);
+    if (upright !== canvas) releaseCanvas(upright);
+  }
 }
 
 function largestFace(faces: DetectedFace[], width: number, height: number): DetectedFace {
@@ -401,47 +407,51 @@ function arch(points: Px[], indices: number[]): number {
 
 async function finishDrafts(drafts: Draft[], issues: Issue[]): Promise<AnalyzedFeature[]> {
   const usable = drafts.filter((draft) => draft.crop && draft.confidence >= 0.4);
-  const embeddings: number[][] = [];
-  let embedFailed = false;
-  for (const draft of usable) {
-    if (!draft.crop) {
-      embeddings.push([]);
-      continue;
+  try {
+    const embeddings: number[][] = [];
+    let embedFailed = false;
+    for (const draft of usable) {
+      if (!draft.crop) {
+        embeddings.push([]);
+        continue;
+      }
+      try {
+        embeddings.push(await embedCanvas(draft.crop));
+      } catch {
+        embedFailed = true;
+        embeddings.push([]);
+      }
     }
-    try {
-      embeddings.push(await embedCanvas(draft.crop));
-    } catch {
-      embedFailed = true;
-      embeddings.push([]);
+    if (embedFailed) {
+      issues.push({
+        severity: "warn",
+        code: "embed-unavailable",
+        message: "The resemblance model didn't load, so this photo is compared by shape only.",
+      });
     }
+    const features: AnalyzedFeature[] = [];
+    for (let i = 0; i < usable.length; i++) {
+      const draft = usable[i];
+      if (!draft.crop) continue;
+      const described = describeFeature(draft.id, draft.geometry);
+      features.push({
+        id: draft.id,
+        friendly: described.friendly,
+        detail: described.detail,
+        confidence: draft.confidence,
+        shape: draft.shape,
+        geometry: draft.geometry,
+        appearance: embeddings[i] ?? [],
+        contour: draft.contour,
+        cropBlob: await blobFrom(draft.crop),
+        cropWidth: draft.crop.width,
+        cropHeight: draft.crop.height,
+      });
+    }
+    return features;
+  } finally {
+    for (const draft of drafts) releaseCanvas(draft.crop);
   }
-  if (embedFailed) {
-    issues.push({
-      severity: "warn",
-      code: "embed-unavailable",
-      message: "The resemblance model didn't load, so this photo is compared by shape only.",
-    });
-  }
-  const features: AnalyzedFeature[] = [];
-  for (let i = 0; i < usable.length; i++) {
-    const draft = usable[i];
-    if (!draft.crop) continue;
-    const described = describeFeature(draft.id, draft.geometry);
-    features.push({
-      id: draft.id,
-      friendly: described.friendly,
-      detail: described.detail,
-      confidence: draft.confidence,
-      shape: draft.shape,
-      geometry: draft.geometry,
-      appearance: embeddings[i] ?? [],
-      contour: draft.contour,
-      cropBlob: await blobFrom(draft.crop),
-      cropWidth: draft.crop.width,
-      cropHeight: draft.crop.height,
-    });
-  }
-  return features;
 }
 
 function blobFrom(canvas: HTMLCanvasElement): Promise<Blob> {

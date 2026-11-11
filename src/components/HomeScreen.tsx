@@ -5,7 +5,6 @@ import { CropImage } from "./CropImage";
 export function HomeScreen({
   baby,
   familyCount,
-  storageError,
   onStartBaby,
   onFeatures,
   onFamily,
@@ -20,7 +19,6 @@ export function HomeScreen({
 }: {
   baby: Person | null;
   familyCount: number;
-  storageError: string | null;
   onStartBaby: () => void;
   onFeatures: () => void;
   onFamily: () => void;
@@ -41,7 +39,6 @@ export function HomeScreen({
       <p className="lede">See which family member your baby’s ears, eyes, nose, and smile look most like.</p>
       <Hero />
       <p className="privacy">Photos stay on this phone. Face matching runs in the browser and nothing is uploaded.</p>
-      {storageError ? <p className="issue error">{storageError}</p> : null}
       {baby ? (
         <article className="card baby-card">
           <div className="baby-row">

@@ -1,7 +1,14 @@
 import type { Px, Rect } from "../analysis/math";
 import { contrastStretch, hogDescriptor } from "../analysis/descriptors";
 
-export async function decodeImage(blob: Blob, maxEdge = 1280): Promise<HTMLCanvasElement> {
+/** Drop a canvas's pixel buffer. Full-frame phone photos add up across a rebuild. */
+export function releaseCanvas(canvas: HTMLCanvasElement | null | undefined) {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+export async function decodeImage(blob: Blob, maxEdge = 960): Promise<HTMLCanvasElement> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });

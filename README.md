@@ -40,7 +40,7 @@ Nothing is compared in raw pixels or millimeters. Each result is a **share acros
 
 People, photos, and measurements are stored in IndexedDB. The app asks the browser to keep that data (`navigator.storage.persist()`).
 
-Saved photos from an older measurement version are detected on open and measured again automatically. The people and the photo files stay; a progress line shows whose photo is updating. **Re-run comparison** does that again on purpose. **Save backup** / **Restore backup** writes or reads a JSON file of the people and their photos. Restoring measures them with the current pipeline. Starting over deletes everything. The results screen can also export a score JSON (no photos) and a summary image.
+Saved photos from an older measurement version are detected on open and measured again automatically. The people and the photo files stay; a progress line shows whose photo is updating. When that finishes, the comparison opens. If a photo cannot be updated, the progress screen closes, the photos stay, and a retry is offered. **Re-run comparison** does that again on purpose. **Save backup** / **Restore backup** writes or reads a JSON file of the people and their photos. Restoring measures them with the current pipeline. Starting over deletes everything. The results screen can also export a score JSON (no photos) and a summary image.
 
 ## Limits
 

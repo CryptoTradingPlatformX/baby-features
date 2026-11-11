@@ -2,6 +2,16 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { peopleFromBackup, peopleToBackup } from "./backup";
 import { clearPeople, deletePerson, loadPeople, savePerson } from "./db";
 import { countPhotosToRebuild, migratePeople, type MigrateProgress } from "./migrate";
+import {
+  failMigration,
+  finishMigration,
+  MIGRATION_FAILED,
+  noteMigrationProgress,
+  showSavedPeople,
+  startMigration,
+  viewBooting,
+  type MigrationView,
+} from "./migrationFlow";
 import { requestPersistentStorage } from "./persist";
 import { SCHEMA_VERSION, type Person } from "./types";
 
@@ -9,8 +19,10 @@ interface Store {
   people: Person[];
   ready: boolean;
   error: string | null;
+  canRetry: boolean;
   persisted: boolean | null;
   migration: MigrateProgress | null;
+  landing: MigrationView["landing"];
   baby: Person | null;
   family: Person[];
   save: (person: Person) => Promise<void>;
@@ -22,99 +34,112 @@ interface Store {
 }
 
 const PeopleContext = createContext<Store | null>(null);
+const STORAGE_BLOCKED = "This browser blocked on-phone storage. Try another browser, or leave private mode, then reload.";
 
 export function PeopleProvider({ children }: { children: ReactNode }) {
-  const [people, setPeople] = useState<Person[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<MigrationView>(viewBooting);
   const [persisted, setPersisted] = useState<boolean | null>(null);
-  const [migration, setMigration] = useState<MigrateProgress | null>(null);
+
+  function replacePeople(list: Person[]) {
+    setView((current) => ({ ...current, people: list }));
+  }
 
   async function remember(next: Person) {
     const stamped = { ...next, schemaVersion: next.schemaVersion ?? SCHEMA_VERSION };
     await savePerson(stamped);
-    setPeople((current) => {
-      const list = current ?? [];
+    setView((current) => {
+      const list = current.people ?? [];
       const index = list.findIndex((item) => item.id === stamped.id);
-      if (index === -1) return [...list, stamped];
-      const copy = list.slice();
-      copy[index] = stamped;
-      return copy;
+      const people = index === -1 ? [...list, stamped] : list.map((item, i) => (i === index ? stamped : item));
+      return { ...current, people };
     });
   }
 
   async function rebuild(source: Person[], force: boolean) {
-    setMigration({ done: 0, total: countPhotosToRebuild(source, force), label: "Updating saved photos…" });
+    const total = countPhotosToRebuild(source, force);
+    setView((current) => startMigration(current, source, { done: 0, total, label: "Updating saved photos…" }));
     try {
-      const fresh = await migratePeople(source, { force, onProgress: setMigration });
-      setPeople(fresh);
-    } finally {
-      setMigration(null);
+      const outcome = await migratePeople(source, {
+        force,
+        onProgress: (progress) => setView((current) => noteMigrationProgress(current, progress)),
+      });
+      setView((current) => finishMigration(current, outcome.people, outcome.failures, total > 0));
+    } catch {
+      setView((current) => failMigration(current, current.people ?? source, MIGRATION_FAILED, true));
     }
   }
 
   useEffect(() => {
-    let cancel = false;
+    let active = true;
     void (async () => {
+      let loaded: Person[] | null = null;
       try {
         const kept = await requestPersistentStorage();
-        if (!cancel) setPersisted(kept);
-        const loaded = await loadPeople();
-        if (cancel) return;
-        if (countPhotosToRebuild(loaded, false) === 0) {
-          const stamped = loaded.map((person) => ({ ...person, schemaVersion: SCHEMA_VERSION }));
+        if (active) setPersisted(kept);
+        const saved = await loadPeople();
+        loaded = saved;
+        if (!active) return;
+        if (countPhotosToRebuild(saved, false) === 0) {
+          const stamped = saved.map((person) => ({ ...person, schemaVersion: SCHEMA_VERSION }));
           for (const person of stamped) {
-            if (loaded.find((item) => item.id === person.id)?.schemaVersion !== SCHEMA_VERSION) await savePerson(person);
+            if (saved.find((item) => item.id === person.id)?.schemaVersion !== SCHEMA_VERSION) await savePerson(person);
           }
-          if (!cancel) setPeople(stamped);
+          if (active) setView((current) => showSavedPeople(current, stamped));
           return;
         }
-        if (!cancel) {
-          setPeople(loaded);
-          setMigration({
-            done: 0,
-            total: countPhotosToRebuild(loaded, false),
-            label: "Updating saved photos…",
-          });
+        if (active) {
+          setView((current) =>
+            startMigration(current, saved, {
+              done: 0,
+              total: countPhotosToRebuild(saved, false),
+              label: "Updating saved photos…",
+            }),
+          );
         }
-        const fresh = await migratePeople(loaded, { onProgress: (progress) => { if (!cancel) setMigration(progress); } });
-        if (!cancel) {
-          setPeople(fresh);
-          setMigration(null);
-        }
+        const outcome = await migratePeople(saved, {
+          shouldContinue: () => active,
+          onProgress: (progress) => {
+            if (active) setView((current) => noteMigrationProgress(current, progress));
+          },
+        });
+        if (!active) return;
+        setView((current) => finishMigration(current, outcome.people, outcome.failures, true));
       } catch {
-        if (!cancel) {
-          setError("This browser blocked on-phone storage. Try another browser, or leave private mode, then reload.");
-          setPeople([]);
-        }
+        if (!active) return;
+        const fallback = loaded;
+        if (fallback) setView((current) => failMigration(current, current.people ?? fallback, MIGRATION_FAILED, true));
+        else setView((current) => failMigration(current, [], STORAGE_BLOCKED, false));
       }
     })();
     return () => {
-      cancel = true;
+      active = false;
     };
   }, []);
 
+  const people = view.people;
   const store = useMemo<Store | null>(() => {
     if (!people) return null;
     return {
       people,
       ready: true,
-      error,
+      error: view.error,
+      canRetry: view.canRetry,
       persisted,
-      migration,
+      migration: view.migration,
+      landing: view.landing,
       baby: people.find((person) => person.kind === "baby") ?? null,
       family: people.filter((person) => person.kind === "family"),
       save: remember,
       async remove(id) {
         await deletePerson(id);
-        setPeople((current) => (current ?? []).filter((person) => person.id !== id));
+        setView((current) => ({ ...current, people: (current.people ?? []).filter((person) => person.id !== id) }));
       },
       async reset() {
         await clearPeople();
-        setPeople([]);
+        replacePeople([]);
       },
       async rerun() {
-        const current = people;
-        await rebuild(current, true);
+        await rebuild(people, true);
       },
       async exportBackup() {
         const backup = await peopleToBackup(people);
@@ -131,11 +156,10 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         const imported = await peopleFromBackup(text);
         for (const person of imported) await savePerson(person);
         const merged = mergePeople(people, imported);
-        setPeople(merged);
         await rebuild(merged, false);
       },
     };
-  }, [people, error, persisted, migration]);
+  }, [people, view.error, view.canRetry, view.migration, view.landing, persisted]);
 
   if (!store) {
     return (
@@ -148,7 +172,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
   return (
     <PeopleContext.Provider value={store}>
       {children}
-      {migration && migration.total > 0 ? <MigrationNotice progress={migration} /> : null}
+      {view.migration && view.migration.total > 0 ? <MigrationNotice progress={view.migration} /> : null}
     </PeopleContext.Provider>
   );
 }
@@ -168,7 +192,7 @@ function mergePeople(existing: Person[], imported: Person[]): Person[] {
 function MigrationNotice({ progress }: { progress: MigrateProgress }) {
   const ratio = progress.total ? progress.done / progress.total : 0;
   return (
-    <div className="modal" role="status" aria-live="polite">
+    <div className="modal" role="status" aria-live="polite" data-testid="migration-notice">
       <div className="card">
         <h2>Updating saved photos</h2>
         <p>{progress.label}</p>

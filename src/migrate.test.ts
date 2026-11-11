@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { analysisIsStale, countPhotosToRebuild, photosToRebuild } from "./migrate";
-import { ANALYSIS_VERSION, SCHEMA_VERSION, type Person, type PhotoAnalysis } from "./types";
+import { analysisIsStale, countPhotosToRebuild, migratePeople, photosToRebuild } from "./migrate";
+import { finishMigration, noteMigrationProgress, startMigration, viewBooting } from "./migrationFlow";
+import { ANALYSIS_VERSION, SCHEMA_VERSION, type Angle, type Person, type PhotoAnalysis, type StoredPhoto } from "./types";
 import { base64ToBlob, blobToBase64, peopleFromBackup, peopleToBackup } from "./backup";
 
 describe("saved analysis migration", () => {
@@ -45,6 +46,66 @@ describe("saved analysis migration", () => {
     expect(Array.from(bytes)).toEqual([1, 2, 3, 4, 255]);
     expect(await blobToBase64(base64ToBlob(await blobToBase64(jpeg)))).toBe(await blobToBase64(jpeg));
   });
+
+  it("finishes after the last saved photo and leaves an actionable screen", async () => {
+    const people = [member("baby", "baby", "Baby", 1), member("mom", "family", "Mom", 2), member("dad", "family", "Dad", 3)];
+    expect(countPhotosToRebuild(people, false)).toBe(6);
+    const saves: string[] = [];
+    let view = startMigration(viewBooting(), people, { done: 0, total: 6, label: "Updating saved photos…" });
+    const outcome = await migratePeople(people, {
+      onProgress: (progress) => {
+        view = noteMigrationProgress(view, progress);
+      },
+      deps: {
+        analyze: async () => ({ analysis: analysis(ANALYSIS_VERSION, true) }),
+        save: async (person) => {
+          saves.push(`${person.id}:${Object.keys(person.photos).length}`);
+          if (saves.length > 6) throw new Error("saved again after the counter finished");
+        },
+      },
+    });
+
+    expect(saves).toHaveLength(6);
+    expect(outcome.failures).toEqual([]);
+    expect(view.migration).toEqual({ done: 6, total: 6, label: expect.any(String) });
+    view = finishMigration(view, outcome.people, outcome.failures, true);
+    expect(view.migration).toBeNull();
+    expect(view.landing).toEqual({ id: 1, to: "results" });
+    expect(view.people?.every((person) => person.schemaVersion === SCHEMA_VERSION)).toBe(true);
+    expect(view.people?.map((person) => person.id)).toEqual(["baby", "mom", "dad"]);
+    view = noteMigrationProgress(view, { done: 6, total: 6, label: "late" });
+    expect(view.migration).toBeNull();
+  });
+
+  it("still completes the transition when the last photo cannot be saved", async () => {
+    const people = [member("baby", "baby", "Baby", 1), member("mom", "family", "Mom", 2), member("dad", "family", "Dad", 3)];
+    let writes = 0;
+    const outcome = await migratePeople(people, {
+      deps: {
+        analyze: async () => ({ analysis: analysis(ANALYSIS_VERSION, true) }),
+        save: async () => {
+          writes += 1;
+          if (writes === 6) throw new Error("quota");
+        },
+      },
+    });
+    expect(outcome.failures).toEqual(["Dad · left side"]);
+    const view = finishMigration(
+      noteMigrationProgress(startMigration(viewBooting(), people, { done: 0, total: 6, label: "" }), {
+        done: 6,
+        total: 6,
+        label: "Dad · left side",
+      }),
+      outcome.people,
+      outcome.failures,
+      true,
+    );
+    expect(view.migration).toBeNull();
+    expect(view.canRetry).toBe(true);
+    expect(view.error).toMatch(/Dad · left side/);
+    expect(view.people).toHaveLength(3);
+    expect(view.landing?.to).toBe("results");
+  });
 });
 
 function analysis(version: number, withShape: boolean): PhotoAnalysis {
@@ -69,6 +130,29 @@ function analysis(version: number, withShape: boolean): PhotoAnalysis {
     ],
     sharpness: 1,
     brightness: 0.5,
+  };
+}
+
+function shot(angle: Angle): StoredPhoto {
+  return {
+    angle,
+    blob: new Blob(["jpeg"]),
+    width: 8,
+    height: 8,
+    createdAt: 1,
+    analysis: analysis(1, false),
+  };
+}
+
+function member(id: string, kind: "baby" | "family", name: string, createdAt: number): Person {
+  return {
+    id,
+    kind,
+    name,
+    relationship: name,
+    createdAt,
+    schemaVersion: 1,
+    photos: { front: shot("front"), left: shot("left") },
   };
 }
 
