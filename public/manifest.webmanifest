@@ -1,0 +1,9 @@
+{
+  "name": "Baby Features",
+  "short_name": "Baby Features",
+  "start_url": "/baby-features/",
+  "display": "standalone",
+  "background_color": "#fff6ee",
+  "theme_color": "#fff6ee",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
