@@ -6,19 +6,28 @@ import { FEATURES } from "../types";
 import { featuresById } from "../analysis/compare";
 import { CropImage } from "./CropImage";
 
+function fmt(value: number | null): string {
+  return value == null || !Number.isFinite(value) ? "—" : value.toFixed(3);
+}
+
 export function ResultsScreen({
   baby,
   family,
   onBack,
   onAddFamily,
+  onRerun,
+  busy,
 }: {
   baby: Person;
   family: Person[];
   onBack: () => void;
   onAddFamily: () => void;
+  onRerun: () => void;
+  busy: boolean;
 }) {
   const comparison = useMemo(() => compareFamily(baby, family), [baby, family]);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  const [showMath, setShowMath] = useState(false);
   const crops = useMemo(() => {
     const map = new Map<string, ReturnType<typeof featuresById>>();
     map.set(baby.id, featuresById(baby));
@@ -52,6 +61,16 @@ export function ResultsScreen({
           <h1>Who {baby.name} resembles</h1>
         </div>
       </header>
+
+      <label className="math-toggle">
+        <input
+          type="checkbox"
+          data-testid="show-math"
+          checked={showMath}
+          onChange={(event) => setShowMath(event.target.checked)}
+        />
+        Show the math
+      </label>
 
       <article className="summary-card">
         <h2>{comparison.headline}</h2>
@@ -95,23 +114,46 @@ export function ResultsScreen({
                 <figure>
                   <CropImage blob={leaderCrop.cropBlob} alt={`${leader.name} ${feature.label}`} />
                   <figcaption>
-                    {leader.name} · {Math.round(leader.score * 100)}%
+                    {leader.share == null ? leader.name : `${leader.name} · ${Math.round(leader.share * 100)}%`}
                   </figcaption>
                 </figure>
               </div>
             ) : null}
-            {feature.ranked.length > 1 ? (
+            {feature.ranked.length > 1 && feature.ranked.some((row) => row.share != null) ? (
               <ol className="rank-list">
                 {feature.ranked.map((row) => (
                   <li key={row.personId}>
                     <span>{row.name}</span>
                     <div className="bar" aria-hidden="true">
-                      <span style={{ width: `${Math.round(row.score * 100)}%` }} />
+                      <span style={{ width: `${Math.round((row.share ?? 0) * 100)}%` }} />
                     </div>
-                    <em>{Math.round(row.score * 100)}%</em>
+                    <em>{Math.round((row.share ?? 0) * 100)}%</em>
                   </li>
                 ))}
               </ol>
+            ) : null}
+            {showMath && feature.ranked.length ? (
+              <div className="math" data-testid={`math-${feature.id}`}>
+                <p>
+                  Decided by <strong>{feature.driverText}</strong>
+                  {feature.yardstick != null ? `. Distance between these adults: ${feature.yardstick.toFixed(2)}` : ""}
+                </p>
+                {feature.ranked.map((row) => (
+                  <div key={row.personId} className="math-person">
+                    <strong>
+                      {row.name}
+                      {row.share == null ? "" : ` · ${Math.round(row.share * 100)}%`}
+                    </strong>
+                    <ul>
+                      <li>Shape distance {fmt(row.shapeDistance)}</li>
+                      <li>Appearance distance {fmt(row.appearanceDistance)}</li>
+                      <li>Outline distance {fmt(row.contourDistance)}</li>
+                      <li>Proportion distance {fmt(row.ratioDistance)}</li>
+                      <li>Combined distance {fmt(row.combinedDistance)}</li>
+                    </ul>
+                  </div>
+                ))}
+              </div>
             ) : null}
             {feature.unavailable.length ? (
               <ul className="missing">
@@ -126,6 +168,11 @@ export function ResultsScreen({
         );
       })}
 
+      <div className="actions">
+        <button className="btn secondary wide" type="button" data-testid="rerun" onClick={onRerun} disabled={busy}>
+          Re-run comparison
+        </button>
+      </div>
       <div className="actions">
         <button className="btn" type="button" onClick={() => void saveImage()}>
           Save summary image

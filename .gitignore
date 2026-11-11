@@ -5,3 +5,4 @@ dist
 .vite
 public/models
 public/wasm
+public/onnx

@@ -3,7 +3,7 @@ import { appearanceScore, cosine, geometryScore, normalizeContour } from "./math
 import { classifyPose, poseIssues, turnAmount } from "./pose";
 import { estimateEarBox, refineEarRoi } from "./ears";
 import { fourierMagnitudes, hogDescriptor } from "./descriptors";
-import { compareFamily, featureScore, rankingSentence } from "./compare";
+import { compareFamily } from "./compare";
 import type { AnalyzedFeature, Person } from "../types";
 import { ANALYSIS_VERSION } from "../types";
 import type { Px } from "./math";
@@ -139,52 +139,66 @@ describe("ears", () => {
 });
 
 describe("comparison", () => {
-  it("writes the ranked sentence the parents read", () => {
-    expect(
-      rankingSentence("Ears", [
-        { name: "Grandpa", score: 0.824 },
-        { name: "Dad", score: 0.714 },
-      ]),
-    ).toBe("Ears: most like Grandpa (82%), then Dad (71%)");
-  });
-
-  it("marks a missing angle as not enough photos and ranks the rest", () => {
+  it("splits a feature across relatives and skips a missing angle", () => {
+    const eye = [0, 0, 1, 0, 1, 0.35, 0.5, 0.5, 0, 0.35];
     const baby = person("baby", "Baby", {
-      front: feature("eyes", [0.4, 2, 0.4, 0.2], [1, 0, 0, 1]),
-      left: feature("leftEar", [1.5, 1.6], [0, 1, 0, 1], [0.2, 0.1, 0.05]),
+      front: feature("eyes", eye, [0.3, 0.2], unit([1, 0, 0, 1])),
+      left: feature("leftEar", [0, 0, 0.2, 1, 0.5, 1.2, 0.4, 0.2], [1.5], unit([0, 1, 0]), [0.2, 0.4, 0.1]),
     });
     const mom = person("mom", "Mom", {
-      front: feature("eyes", [0.41, 3, 0.41, 0.21], [1, 0.1, 0, 1]),
+      front: feature("eyes", eye.map((value, index) => value + (index % 2 === 0 ? 0.01 : 0)), [0.31, 0.21], unit([1, 0.05, 0, 1])),
     });
     const grandpa = person("grandpa", "Grandpa", {
-      front: feature("eyes", [0.7, -8, 0.3, 0.15], [0, 1, 0, 0]),
-      left: feature("leftEar", [1.52, 1.58], [0, 0.9, 0.1, 1], [0.2, 0.11, 0.04]),
+      front: feature("eyes", [0, 0, 1, 0, 1, 1.3, 0.5, 1.5, 0, 1.2], [0.9, -0.4], unit([0, 1, 0, 0])),
+      left: feature("leftEar", [0, 0, 0.2, 1.05, 0.55, 1.15, 0.42, 0.18], [1.55], unit([0, 0.95, 0.1]), [0.22, 0.38, 0.12]),
     });
     const result = compareFamily(baby, [mom, grandpa]);
-    const eyes = result.features.find((feature) => feature.id === "eyes");
-    const ear = result.features.find((feature) => feature.id === "leftEar");
+    const eyes = result.features.find((item) => item.id === "eyes");
+    const ear = result.features.find((item) => item.id === "leftEar");
     expect(eyes?.ranked[0].name).toBe("Mom");
-    expect(eyes?.unavailable.some((row) => row.name === "Grandpa")).toBe(false);
+    expect((eyes?.ranked[0].share ?? 0) > (eyes?.ranked[1].share ?? 0)).toBe(true);
+    expect(eyes?.sentence.startsWith("Eyes: Mom")).toBe(true);
+    expect(eyes?.unavailable).toEqual([]);
     expect(ear?.ranked.map((row) => row.name)).toEqual(["Grandpa"]);
+    expect(ear?.sentence).toBe("Left ear: only Grandpa to compare");
     expect(ear?.unavailable[0]).toEqual({ name: "Mom", reason: "Not enough photos" });
-    expect(ear?.sentence.startsWith("Left ear: most like Grandpa")).toBe(true);
     expect(result.headline).toContain("Baby");
+    expect(result.overall.reduce((sum, row) => sum + row.score, 0)).toBeCloseTo(1, 5);
   });
 
-  it("returns null when a feature is too uncertain to score", () => {
-    const clear = feature("nose", [0.2, 0.3, 0.4], [1, 0, 0]);
-    const shaky = feature("nose", [0.2, 0.3, 0.4], [1, 0, 0]);
-    shaky.confidence = 0.2;
-    expect(featureScore(clear, shaky)).toBeNull();
+  it("drops a feature that is too uncertain to score", () => {
+    const shape = [0, 0, 1, 0, 1, 0.4, 0, 0.4];
+    const baby = person("baby", "Baby", { front: feature("nose", shape, [0.2], unit([1, 0])) });
+    const shaky = person("mom", "Mom", { front: feature("nose", shape, [0.2], unit([1, 0])) });
+    const photo = shaky.photos.front?.analysis?.features[0];
+    if (photo) photo.confidence = 0.2;
+    const result = compareFamily(baby, [shaky]);
+    const nose = result.features.find((item) => item.id === "nose");
+    expect(nose?.ranked).toEqual([]);
+    expect(nose?.unavailable[0].reason).toBe("Not clear enough in the photo");
   });
 });
 
-function feature(id: AnalyzedFeature["id"], geometry: number[], appearance: number[], contour: number[] = []): AnalyzedFeature {
+function unit(values: number[]): number[] {
+  let norm = 0;
+  for (const value of values) norm += value * value;
+  norm = Math.sqrt(norm) || 1;
+  return values.map((value) => value / norm);
+}
+
+function feature(
+  id: AnalyzedFeature["id"],
+  shape: number[],
+  geometry: number[],
+  appearance: number[],
+  contour: number[] = [],
+): AnalyzedFeature {
   return {
     id,
     friendly: id,
     detail: "",
     confidence: 0.9,
+    shape,
     geometry,
     appearance,
     contour,

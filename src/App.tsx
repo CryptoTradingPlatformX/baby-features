@@ -57,6 +57,11 @@ function Shell() {
           onRetake={() => {
             if (store.baby) setScreen({ name: "capture", personId: store.baby.id, after: "features" });
           }}
+          onRerun={() => void store.rerun()}
+          onExport={() => void store.exportBackup()}
+          onImport={(file) => void store.importBackup(file)}
+          busy={store.migration != null}
+          persisted={store.persisted}
           onReset={() =>
             setConfirm({
               title: "Start over?",
@@ -82,7 +87,6 @@ function Shell() {
       {screen.name === "features" && store.baby ? (
         <FeatureScreen
           person={store.baby}
-          onSave={store.save}
           onBack={() => setScreen({ name: "home" })}
           onRetake={() => setScreen({ name: "capture", personId: store.baby!.id, after: "features" })}
           onAddFamily={() => setScreen({ name: "family" })}
@@ -116,6 +120,8 @@ function Shell() {
           family={store.family}
           onBack={() => setScreen({ name: "home" })}
           onAddFamily={() => setScreen({ name: "family" })}
+          onRerun={() => void store.rerun()}
+          busy={store.migration != null}
         />
       ) : null}
 

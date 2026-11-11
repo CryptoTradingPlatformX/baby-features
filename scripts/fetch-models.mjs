@@ -1,4 +1,4 @@
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -53,4 +53,44 @@ if (!modelReady()) {
   await downloadModel();
 }
 
-console.log("Face model and wasm files are ready.");
+const onnxOut = join(root, "public", "onnx");
+mkdirSync(onnxOut, { recursive: true });
+for (const folder of [
+  join(root, "node_modules", "onnxruntime-web", "dist"),
+  join(root, "node_modules", "@huggingface", "transformers", "dist"),
+]) {
+  if (!existsSync(folder)) continue;
+  for (const name of readdirSync(folder)) {
+    if (!name.startsWith("ort-wasm")) continue;
+    copyFileSync(join(folder, name), join(onnxOut, name));
+  }
+}
+
+const dinoRoot = join(modelDir, "Xenova", "dinov2-small");
+const dinoFiles = [
+  ["config.json", "https://huggingface.co/Xenova/dinov2-small/resolve/main/config.json"],
+  ["preprocessor_config.json", "https://huggingface.co/Xenova/dinov2-small/resolve/main/preprocessor_config.json"],
+  ["onnx/model_quantized.onnx", "https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model_quantized.onnx"],
+];
+for (const [name, url] of dinoFiles) {
+  const destination = join(dinoRoot, name);
+  if (existsSync(destination) && statSync(destination).size > (name.endsWith(".onnx") ? 1_000_000 : 20)) continue;
+  mkdirSync(dirname(destination), { recursive: true });
+  let lastError = "download failed";
+  let saved = false;
+  for (let attempt = 1; attempt <= 3 && !saved; attempt++) {
+    try {
+      console.log(`Downloading ${name} (attempt ${attempt})...`);
+      const response = await fetch(url);
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
+      saved = true;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      console.warn(lastError);
+    }
+  }
+  if (!saved) throw new Error(`Could not download ${name}: ${lastError}`);
+}
+
+console.log("Face model, resemblance model, and wasm files are ready.");

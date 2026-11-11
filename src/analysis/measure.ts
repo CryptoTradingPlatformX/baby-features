@@ -25,15 +25,18 @@ import {
   UPPER_INNER,
   UPPER_LIP,
 } from "./landmarks";
-import { angleDeg, bboxOf, dist, midpoint, normalizeContour, outsideFraction, pointLineDistance, type Px, type Rect } from "./math";
+import { angleDeg, bboxOf, dist, midpoint, outsideFraction, pointLineDistance, type Px, type Rect } from "./math";
 import { classifyPose, poseIssues, type PoseSignals } from "./pose";
 import { assessRegion, expressionIssues } from "./quality";
-import { fourierMagnitudes } from "./descriptors";
-import { appearanceFromCanvas, cropCanvas, flipSceneH, regionPixels, rotateScene, skinFraction } from "../vision/imageutil";
+import { fourierMagnitudes, resampleClosed } from "./descriptors";
+import { flattenShape, undoHeadPose } from "./score";
+import { embedCanvas } from "../vision/embed";
+import { cropCanvas, flipSceneH, regionPixels, rotateScene, skinFraction } from "../vision/imageutil";
 
 interface Draft {
   id: FeatureId;
   geometry: number[];
+  shape: number[];
   crop: HTMLCanvasElement | null;
   contour: number[];
   confidence: number;
@@ -108,8 +111,9 @@ export async function measurePhoto(source: HTMLCanvasElement, faces: DetectedFac
     }
   }
 
-  const drafts = expected === "front" ? frontDrafts(canvas, points, issues) : profileDrafts(canvas, points, expected, issues);
-  const features = await finishDrafts(drafts);
+  const canonical = undoHeadPose(face.landmarks, face.matrix);
+  const drafts = expected === "front" ? frontDrafts(canvas, points, issues, canonical) : profileDrafts(canvas, points, expected, issues);
+  const features = await finishDrafts(drafts, issues);
   return { version: ANALYSIS_VERSION, pose, issues, features, sharpness, brightness };
 }
 
@@ -174,13 +178,12 @@ function uprightByChin(src: HTMLCanvasElement, points: Px[]) {
   return rotateScene(src, points, radians, (top.x + chin.x) / 2, (top.y + chin.y) / 2);
 }
 
-function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): Draft[] {
+function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[], canonical: { x: number; y: number }[]): Draft[] {
   const faceW = dist(points[234], points[454]) || 1;
   const faceH = dist(points[10], points[152]) || 1;
   const jawW = dist(points[172], points[397]);
   const foreheadW = dist(points[54], points[284]) || faceW;
   const iod = dist(midpoint(points[33], points[133]), midpoint(points[263], points[362])) || 1;
-  const oval = FACE_OVAL.map((index) => points[index]);
 
   const rightH = dist(points[159], points[145]);
   const rightW = dist(points[33], points[133]) || 1;
@@ -223,7 +226,8 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
   return [
     {
       id: "faceShape",
-      geometry: [faceW / faceH, jawW / foreheadW, ...normalizeContour(oval)],
+      geometry: [faceW / faceH, jawW / foreheadW],
+      shape: flattenShape(canonical, FACE_OVAL),
       crop: cropCanvas(canvas, bboxOf(points, FACE_OVAL, 0.12, 0.1) as Rect, 320),
       contour: [],
       confidence: 0.84,
@@ -231,6 +235,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
     {
       id: "forehead",
       geometry: [dist(points[10], browMid) / faceH, foreheadW / faceW],
+      shape: flattenShape(canonical, FOREHEAD),
       crop: foreheadCrop,
       contour: [],
       confidence: foreheadConfidence,
@@ -238,6 +243,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
     {
       id: "eyebrows",
       geometry: [(arch(points, [70, 63, 105, 66, 107]) + arch(points, [300, 293, 334, 296, 336])) / 2, dist(points[107], points[336]) / iod],
+      shape: flattenShape(canonical, [...RIGHT_BROW, ...LEFT_BROW]),
       crop: cropCanvas(canvas, bboxOf(points, [...LEFT_BROW, ...RIGHT_BROW], 0.2, 0.55) as Rect, 300),
       contour: [],
       confidence: 0.8,
@@ -245,6 +251,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
     {
       id: "eyes",
       geometry: [aspect, (rightTilt + leftTilt) / 2, iod / faceW, (rightW + leftW) / 2 / faceW],
+      shape: flattenShape(canonical, [...RIGHT_EYE, ...LEFT_EYE]),
       crop: cropCanvas(canvas, bboxOf(points, [...LEFT_EYE, ...RIGHT_EYE], 0.25, 0.9) as Rect, 320),
       contour: [],
       confidence: 0.86,
@@ -256,6 +263,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
         dist(points[NOSE_ROOT], points[NOSE_BOTTOM]) / faceH,
         dist(points[45], points[275]) / (dist(points[98], points[327]) || 1),
       ],
+      shape: flattenShape(canonical, NOSE),
       crop: cropCanvas(canvas, bboxOf(points, NOSE, 0.35, 0.25) as Rect, 280),
       contour: [],
       confidence: 0.82,
@@ -268,6 +276,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
         dist(points[UPPER_LIP], points[UPPER_INNER]) / (dist(points[LOWER_INNER], points[LOWER_LIP]) || 1),
         ((points[MOUTH_LEFT].y + points[MOUTH_RIGHT].y) / 2 - midY) / mouthW,
       ],
+      shape: flattenShape(canonical, LIPS),
       crop: cropCanvas(canvas, bboxOf(points, LIPS, 0.28, 0.45) as Rect, 300),
       contour: [],
       confidence: 0.8,
@@ -275,6 +284,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
     {
       id: "chin",
       geometry: [jawW / faceW, dist(points[148], points[377]) / (jawW || 1)],
+      shape: flattenShape(canonical, CHIN_JAW),
       crop: cropCanvas(canvas, bboxOf(points, CHIN_JAW, 0.16, 0.28) as Rect, 300),
       contour: [],
       confidence: 0.78,
@@ -282,6 +292,7 @@ function frontDrafts(canvas: HTMLCanvasElement, points: Px[], issues: Issue[]): 
     {
       id: "cheeks",
       geometry: [(rightBulge + leftBulge) / 2, Math.abs(rightBulge - leftBulge)],
+      shape: flattenShape(canonical, CHEEKS),
       crop: cropCanvas(canvas, bboxOf(points, CHEEKS, 0.18, 0.28) as Rect, 320),
       contour: [],
       confidence: 0.74,
@@ -310,6 +321,7 @@ function profileDrafts(canvas: HTMLCanvasElement, points: Px[], expected: "left"
     {
       id: "noseProfile",
       geometry: [convex / noseLen, angleDeg(root, tip, base) / 180, (root.x - tip.x) / faceH],
+      shape: flattenShape(points, NOSE),
       crop: noseBox ? cropCanvas(canvas, noseBox, 280) : null,
       contour: [],
       confidence: 0.74,
@@ -317,6 +329,7 @@ function profileDrafts(canvas: HTMLCanvasElement, points: Px[], expected: "left"
     {
       id: "chinProfile",
       geometry: [(points[LOWER_LIP].x - points[CHIN].x) / faceH, (points[CHIN].y - points[LOWER_LIP].y) / faceH],
+      shape: flattenShape(points, [LOWER_LIP, CHIN, 148, 176, 377, 400]),
       crop: chinBox ? cropCanvas(canvas, chinBox, 280) : null,
       contour: [],
       confidence: 0.7,
@@ -365,9 +378,11 @@ function profileDrafts(canvas: HTMLCanvasElement, points: Px[], expected: "left"
     });
   }
   const aspect = crop.height / (crop.width || 1);
+  const samples = resampleClosed(refined.contour, 48);
   drafts.push({
     id: expected === "left" ? "leftEar" : "rightEar",
     geometry: [aspect, refined.box ? refined.box.h / (refined.box.w || 1) : aspect],
+    shape: samples.flatMap((point) => [point.x, point.y]),
     crop,
     contour: fourierMagnitudes(refined.contour),
     confidence,
@@ -384,18 +399,42 @@ function arch(points: Px[], indices: number[]): number {
   return max / length;
 }
 
-async function finishDrafts(drafts: Draft[]): Promise<AnalyzedFeature[]> {
+async function finishDrafts(drafts: Draft[], issues: Issue[]): Promise<AnalyzedFeature[]> {
+  const usable = drafts.filter((draft) => draft.crop && draft.confidence >= 0.4);
+  const embeddings: number[][] = [];
+  let embedFailed = false;
+  for (const draft of usable) {
+    if (!draft.crop) {
+      embeddings.push([]);
+      continue;
+    }
+    try {
+      embeddings.push(await embedCanvas(draft.crop));
+    } catch {
+      embedFailed = true;
+      embeddings.push([]);
+    }
+  }
+  if (embedFailed) {
+    issues.push({
+      severity: "warn",
+      code: "embed-unavailable",
+      message: "The resemblance model didn't load, so this photo is compared by shape only.",
+    });
+  }
   const features: AnalyzedFeature[] = [];
-  for (const draft of drafts) {
-    if (!draft.crop || draft.confidence < 0.4) continue;
+  for (let i = 0; i < usable.length; i++) {
+    const draft = usable[i];
+    if (!draft.crop) continue;
     const described = describeFeature(draft.id, draft.geometry);
     features.push({
       id: draft.id,
       friendly: described.friendly,
       detail: described.detail,
       confidence: draft.confidence,
+      shape: draft.shape,
       geometry: draft.geometry,
-      appearance: appearanceFromCanvas(draft.crop),
+      appearance: embeddings[i] ?? [],
       contour: draft.contour,
       cropBlob: await blobFrom(draft.crop),
       cropWidth: draft.crop.width,

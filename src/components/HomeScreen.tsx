@@ -12,6 +12,11 @@ export function HomeScreen({
   onCompare,
   onRetake,
   onReset,
+  onRerun,
+  onExport,
+  onImport,
+  busy,
+  persisted,
 }: {
   baby: Person | null;
   familyCount: number;
@@ -22,6 +27,11 @@ export function HomeScreen({
   onCompare: () => void;
   onRetake: () => void;
   onReset: () => void;
+  onRerun: () => void;
+  onExport: () => void;
+  onImport: (file: File) => void;
+  busy: boolean;
+  persisted: boolean | null;
 }) {
   const face = baby ? featuresById(baby).get("faceShape") ?? featuresById(baby).get("eyes") : undefined;
   return (
@@ -59,12 +69,39 @@ export function HomeScreen({
               Retake
             </button>
           </div>
+          <button className="btn secondary wide" type="button" data-testid="rerun" onClick={onRerun} disabled={busy}>
+            Re-run comparison
+          </button>
         </article>
       ) : (
         <button className="btn wide" type="button" data-testid="start-baby" onClick={onStartBaby}>
           Start with your baby
         </button>
       )}
+      <div className="actions">
+        <button className="btn secondary" type="button" onClick={onExport} disabled={!baby || busy}>
+          Save backup
+        </button>
+        <label className="btn secondary file-btn">
+          Restore backup
+          <input
+            className="hidden-input"
+            data-testid="restore-backup"
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) onImport(file);
+            }}
+          />
+        </label>
+      </div>
+      <p className="note">
+        {persisted
+          ? "This browser was asked to keep the saved photos."
+          : "Export a backup if this browser might clear site data."}
+      </p>
       <p className="disclaimer">
         This measures visual resemblance, not genetics. Baby faces change a lot, so retaking photos every few months is part
         of the fun.
@@ -72,9 +109,10 @@ export function HomeScreen({
       <details className="how">
         <summary>How the comparison works</summary>
         <p>
-          Front-view features come from the straight-on photo. Ears, the nose silhouette, and the chin silhouette come from
-          the side photos. Each crop is scaled to the same size, and proportions are ratios, so a baby’s smaller face can
-          still be compared with an adult. Missing angles are skipped and labeled “not enough photos.”
+          Each feature is a share across the relatives who have that photo, not a standalone percent. Front features are
+          mostly the landmark shape, lined up so size and tilt drop out, plus a lighting-normalized photo embedding. Ears
+          use the side-photo outline and the same embedding. Missing angles are labeled “not enough photos.” A gap inside
+          the noise is “too close to call.”
         </p>
       </details>
       {baby ? (
