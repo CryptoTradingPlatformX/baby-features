@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { peopleFromBackup, peopleToBackup } from "./backup";
+import { appearanceFromBackup, peopleFromBackup, peopleToBackup } from "./backup";
 import { clearPeople, deletePerson, loadPeople, savePerson } from "./db";
 import { countPhotosToRebuild, migratePeople, type MigrateProgress } from "./migrate";
 import {
@@ -13,6 +13,7 @@ import {
   type MigrationView,
 } from "./migrationFlow";
 import { requestPersistentStorage } from "./persist";
+import { applyAppearance, readAppearance } from "./theme";
 import { SCHEMA_VERSION, type Person } from "./types";
 
 interface Store {
@@ -142,7 +143,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         await rebuild(people, true);
       },
       async exportBackup() {
-        const backup = await peopleToBackup(people);
+        const backup = await peopleToBackup(people, readAppearance());
         const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -154,6 +155,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
       async importBackup(file) {
         const text = await file.text();
         const imported = await peopleFromBackup(text);
+        const look = appearanceFromBackup(text);
+        if (look) applyAppearance(look);
         for (const person of imported) await savePerson(person);
         const merged = mergePeople(people, imported);
         await rebuild(merged, false);

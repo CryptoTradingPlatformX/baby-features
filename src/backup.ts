@@ -1,3 +1,4 @@
+import { parseAppearance, readAppearance, type Appearance } from "./theme";
 import { SCHEMA_VERSION, type Angle, type Person, type StoredPhoto } from "./types";
 
 export interface BackupPhoto {
@@ -21,18 +22,34 @@ export interface BackupFile {
   app: "baby-features";
   schemaVersion: number;
   exportedAt: string;
+  /** Chosen skin, including "system". Missing on backups from before themes. */
+  appearance?: Appearance;
   people: BackupPerson[];
 }
 
 const ANGLES: Angle[] = ["front", "left", "right"];
 
-export async function peopleToBackup(people: Person[]): Promise<BackupFile> {
+export async function peopleToBackup(people: Person[], appearance: Appearance = readAppearance()): Promise<BackupFile> {
   return {
     app: "baby-features",
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
+    appearance: parseAppearance(appearance),
     people: await Promise.all(people.map(backupPerson)),
   };
+}
+
+/** Null when the file has no theme, so a restore leaves the current skin alone. */
+export function appearanceFromBackup(raw: string): Appearance | null {
+  let parsed: Partial<BackupFile>;
+  try {
+    parsed = JSON.parse(raw) as Partial<BackupFile>;
+  } catch {
+    return null;
+  }
+  if (parsed.app !== "baby-features") return null;
+  if (parsed.appearance == null || parsed.appearance === ("" as Appearance)) return null;
+  return parseAppearance(parsed.appearance);
 }
 
 export async function peopleFromBackup(raw: string): Promise<Person[]> {

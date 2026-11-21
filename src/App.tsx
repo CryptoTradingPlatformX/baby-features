@@ -4,6 +4,7 @@ import { FamilyScreen } from "./components/FamilyScreen";
 import { FeatureScreen } from "./components/FeatureScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { ResultsScreen } from "./components/ResultsScreen";
+import { ThemePicker } from "./components/ThemePicker";
 import { PeopleProvider, usePeople } from "./state";
 import { uid, type Person } from "./types";
 
@@ -53,6 +54,7 @@ function Shell() {
 
   return (
     <div className="app">
+      <ThemePicker />
       {store.error ? (
         <div className="issue error retry-banner" role="status" data-testid="migration-error">
           <p>{store.error}</p>

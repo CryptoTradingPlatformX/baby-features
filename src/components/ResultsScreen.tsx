@@ -83,7 +83,7 @@ export function ResultsScreen({
                   <strong>{row.name}</strong>
                   {row.relationship !== row.name ? <span>{row.relationship}</span> : null}
                 </div>
-                <em>{Math.round(row.score * 100)}%</em>
+                <em className="num">{Math.round(row.score * 100)}%</em>
                 <div className="bar" aria-hidden="true">
                   <span style={{ width: `${Math.round(row.score * 100)}%` }} />
                 </div>
@@ -103,6 +103,7 @@ export function ResultsScreen({
         return (
           <article key={feature.id} className="result-block" data-testid={`result-${feature.id}`}>
             <h2>{feature.sentence}</h2>
+            {feature.tooClose ? <span className="badge">Too close to call</span> : null}
             {feature.babyMissing ? (
               <p className="issue">Not enough photos of {baby.name} for the {meta?.label.toLowerCase()}.</p>
             ) : leader && babyCrop && leaderCrop ? (
@@ -124,10 +125,10 @@ export function ResultsScreen({
                 {feature.ranked.map((row) => (
                   <li key={row.personId}>
                     <span>{row.name}</span>
+                    <em className="num">{Math.round((row.share ?? 0) * 100)}%</em>
                     <div className="bar" aria-hidden="true">
                       <span style={{ width: `${Math.round((row.share ?? 0) * 100)}%` }} />
                     </div>
-                    <em>{Math.round((row.share ?? 0) * 100)}%</em>
                   </li>
                 ))}
               </ol>
