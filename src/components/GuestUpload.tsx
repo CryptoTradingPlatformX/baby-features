@@ -3,7 +3,7 @@ import { assessRegion } from "../analysis/quality";
 import type { Angle } from "../types";
 import { GuideOverlay } from "./GuideOverlay";
 import { createInviteApi, InviteApiError, inviteApiUrl, type GuestInvite, type InviteApi } from "../invites/api";
-import { filledSlots } from "../invites/importPlan";
+import { filledSlots, rejectionNotes, slotFilled } from "../invites/importPlan";
 import { canvasToBlob, decodeImage, releaseCanvas } from "../vision/imageutil";
 
 const SLOTS: { angle: Angle; title: string; hint: string }[] = [
@@ -54,10 +54,27 @@ export function GuestUpload({ token, api }: { token: string; api?: InviteApi }) 
       const prepared = await downscale(file);
       setNotes((current) => ({ ...current, [angle]: prepared.notes }));
       setProgress(0.15);
-      const ticket = await client.requestUpload(token, angle, "image/jpeg");
+      const ticket = await client.requestUpload(token, angle, prepared.blob.type || "image/jpeg");
       await client.sendUpload(ticket, prepared.blob, (ratio) => setProgress(0.15 + ratio * 0.75));
       const updated = await client.complete(token);
-      setInvite(updated);
+      const rejected = rejectionNotes(updated.rejected);
+      const rejectedHere = rejected.filter((item) => item.slot === angle || item.slot == null);
+      if (rejectedHere.length) {
+        setSlotError((current) => ({ ...current, [angle]: rejectedHere.map((item) => item.message).join(" ") }));
+      }
+      setInvite((current) => {
+        const slots = { ...(current?.slots ?? {}), ...(updated.slots ?? {}) };
+        if (!rejected.some((item) => item.slot === angle)) slots[angle] = slots[angle] ?? true;
+        return {
+          ...(current ?? updated),
+          ...updated,
+          name: updated.name || current?.name || "",
+          role: updated.role || current?.role || "",
+          ownerName: updated.ownerName || current?.ownerName || "",
+          babyName: updated.babyName ?? current?.babyName,
+          slots,
+        };
+      });
       setProgress(1);
     } catch (error) {
       setSlotError((current) => ({
@@ -121,7 +138,7 @@ export function GuestUpload({ token, api }: { token: string; api?: InviteApi }) 
         the whole face in frame.
       </p>
       {SLOTS.map((slot) => {
-        const uploaded = Boolean(invite.slots[slot.angle]);
+        const uploaded = slotFilled(invite.slots?.[slot.angle]);
         return (
           <article key={slot.angle} className="card slot-card" data-testid={`guest-slot-${slot.angle}`}>
             <h2>{slot.title}</h2>

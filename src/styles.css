@@ -760,6 +760,7 @@ a.btn { text-decoration: none; }
 .badge.status-submitted { background: var(--good-bg); color: var(--good); }
 .badge.status-partial { background: var(--warn-bg); color: var(--warn); }
 .badge.status-pending { background: var(--hover); color: var(--muted); }
+.badge.status-expired { background: var(--bad-bg); color: var(--bad); }
 .toast {
   position: fixed;
   left: 50%;

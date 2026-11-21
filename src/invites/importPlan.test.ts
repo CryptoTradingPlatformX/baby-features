@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Person } from "../types";
-import { inviteStatus, personForImport, suggestPerson, withImportedPhoto } from "./importPlan";
+import { importPhotoUrls, inviteStatus, personForImport, rejectionNotes, suggestPerson, withImportedPhoto } from "./importPlan";
 
 function member(id: string, name: string, relationship = name): Person {
   return { id, kind: "family", name, relationship, createdAt: 1, photos: {} };
@@ -35,8 +35,19 @@ describe("invite import mapping", () => {
 
   it("derives pending, partial, and submitted from the slots", () => {
     expect(inviteStatus({})).toBe("pending");
-    expect(inviteStatus({ front: "https://a" })).toBe("partial");
-    expect(inviteStatus({ front: "a", left: "b", right: "c" })).toBe("submitted");
-    expect(inviteStatus({ front: "a" }, "submitted")).toBe("submitted");
+    expect(inviteStatus({ front: true })).toBe("partial");
+    expect(inviteStatus({ front: true, left: true, right: true })).toBe("submitted");
+    expect(inviteStatus({ front: true }, "submitted")).toBe("submitted");
+    expect(inviteStatus({}, "expired")).toBe("expired");
+  });
+
+  it("imports from fresh presigned photo urls, not stored slot flags", () => {
+    expect(importPhotoUrls({ slots: { front: true, left: true }, photos: { front: "https://files/front" } })).toEqual({
+      front: "https://files/front",
+    });
+    expect(rejectionNotes(["front", { slot: "left", reason: "Not an image." }])).toEqual([
+      { slot: "front", message: "front was removed. It was over 15 MB or was not an image. Please try another photo." },
+      { slot: "left", message: "left: Not an image." },
+    ]);
   });
 });

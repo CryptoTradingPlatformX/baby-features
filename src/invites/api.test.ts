@@ -30,9 +30,21 @@ describe("invite API client", () => {
         });
       }
       if (url.endsWith("/owner/invites") && !init?.method) {
-        return jsonResponse([{ token: "tok", name: "Ruth", role: "Grandma", status: "partial", slots: { front: "https://files/front" } }]);
+        return jsonResponse([
+          {
+            token: "tok",
+            name: "Ruth",
+            role: "Grandma",
+            status: "partial",
+            slots: { front: true },
+            photos: { front: "https://files/front" },
+            link: "https://site/#/upload/tok",
+            createdAt: "2026-11-21T00:00:00.000Z",
+            expiresAt: "2026-12-21T00:00:00.000Z",
+          },
+        ]);
       }
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") return jsonResponse({ deleted: true, token: "tok" });
       return jsonResponse({ message: "nope" }, 500);
     };
     const api = createInviteApi("https://api.example.test/", fetchImpl);
@@ -40,7 +52,8 @@ describe("invite API client", () => {
     expect(created.ownerKey).toBe("owner-1");
     expect(created.invites[0].link).toContain("#/upload/tok");
     const list = await api.listOwnerInvites("owner-1");
-    expect(list[0].slots.front).toBe("https://files/front");
+    expect(list[0].photos?.front).toBe("https://files/front");
+    expect(list[0].status).toBe("partial");
     await api.deleteInvite("owner-1", "tok");
     expect(calls.map((call) => `${call.method} ${call.url} key=${call.owner}`)).toEqual([
       "POST https://api.example.test/invites key=null",
@@ -55,32 +68,42 @@ describe("invite API client", () => {
     await expect(api.getInvite("missing")).rejects.toMatchObject({ status: 404, message: "gone" });
   });
 
-  it("uploads with PUT headers or a presigned POST form", async () => {
-    const put = normalizeUploadTicket({ url: "https://s3/put", method: "PUT", headers: { "content-type": "image/jpeg" } });
-    expect(put.method).toBe("PUT");
-    const putRequest = uploadRequest(put, new Blob(["a"], { type: "image/jpeg" }));
-    expect(putRequest.headers["content-type"]).toBe("image/jpeg");
+  it("PUTs the photo with exactly the signed Content-Type", async () => {
+    const ticket = normalizeUploadTicket({
+      url: "https://s3/put",
+      method: "PUT",
+      headers: { "Content-Type": "image/jpeg" },
+      maxBytes: 15_000_000,
+      expiresIn: 300,
+    });
+    expect(ticket).toMatchObject({ method: "PUT", maxBytes: 15_000_000, expiresIn: 300 });
+    const putRequest = uploadRequest(ticket, new Blob(["a"], { type: "image/png" }));
+    expect(putRequest.headers).toEqual({ "Content-Type": "image/jpeg" });
     expect(putRequest.body).toBeInstanceOf(Blob);
+    expect(() => uploadRequest({ ...ticket, maxBytes: 10 }, new Blob([new Uint8Array(20)]))).toThrow(/too large/);
 
-    const post = normalizeUploadTicket({ url: "https://s3/post", fields: { key: "photos/a.jpg", policy: "abc" } });
-    expect(post.method).toBe("POST");
-    const postRequest = uploadRequest(post, new Blob(["a"], { type: "image/jpeg" }));
-    expect(postRequest.body).toBeInstanceOf(FormData);
-    const form = postRequest.body as FormData;
-    expect(form.get("key")).toBe("photos/a.jpg");
-    expect(form.get("file")).toBeInstanceOf(Blob);
-
-    const seen: string[] = [];
+    const seen: { method: string; url: string; type: string | null }[] = [];
     const api = createInviteApi("https://api.example.test", async (url, init) => {
-      seen.push(`${init?.method ?? "GET"} ${url}`);
-      if (String(url).includes("upload-url")) return jsonResponse({ url: "https://s3/put", method: "PUT", headers: { "x-amz": "1" } });
-      expect(init?.method).toBe("PUT");
-      expect(new Headers(init?.headers).get("x-amz")).toBe("1");
+      seen.push({
+        method: init?.method ?? "GET",
+        url: String(url),
+        type: new Headers(init?.headers).get("content-type"),
+      });
+      if (String(url).includes("upload-url")) {
+        return jsonResponse({ url: "https://s3/put", method: "PUT", headers: { "Content-Type": "image/jpeg" }, maxBytes: 100, expiresIn: 60 });
+      }
+      expect(init?.headers).toEqual({ "Content-Type": "image/jpeg" });
       return new Response(null, { status: 200 });
     });
-    const ticket = await api.requestUpload("tok", "left", "image/jpeg");
-    await api.sendUpload(ticket, new Blob(["jpeg"]));
-    expect(seen[0]).toContain("/invites/tok/upload-url");
-    expect(seen[1]).toBe("PUT https://s3/put");
+    const uploaded = await api.requestUpload("tok", "left", "image/jpeg");
+    await api.sendUpload(uploaded, new Blob(["jpeg"], { type: "image/jpeg" }));
+    expect(seen[1]).toEqual({ method: "PUT", url: "https://s3/put", type: "image/jpeg" });
+  });
+
+  it("treats an unknown owner key as unauthorized", async () => {
+    const api = createInviteApi("https://api.example.test", async () => jsonResponse({ message: "Unknown owner" }, 401));
+    await expect(api.createInvites({ ownerName: "Alex", people: [{ name: "Mom", role: "Mom" }] }, "stale")).rejects.toMatchObject({
+      status: 401,
+    });
   });
 });

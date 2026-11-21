@@ -13,7 +13,7 @@ export interface CreatedInvite {
   name: string;
   role: string;
   link: string;
-  expiresAt: string;
+  expiresAt: string | number;
 }
 
 export interface CreateInvitesResponse {
@@ -29,6 +29,8 @@ export interface GuestInvite {
   status: InviteStatus | string;
   slots: InviteSlots;
   expiresAt?: string | null;
+  /** Slots /complete threw away because they were over 15 MB or not an image. */
+  rejected?: unknown;
 }
 
 export interface OwnerInvite {
@@ -38,14 +40,18 @@ export interface OwnerInvite {
   link?: string;
   status: InviteStatus | string;
   slots: InviteSlots;
-  expiresAt?: string | null;
+  /** Presigned GET urls. They last about 15 minutes, so import must download immediately. */
+  photos?: InviteSlots | null;
+  createdAt?: string | number | null;
+  expiresAt?: string | number | null;
 }
 
 export interface UploadTicket {
-  method: "PUT" | "POST";
+  method: "PUT";
   url: string;
   headers: Record<string, string>;
-  fields: Record<string, string> | null;
+  maxBytes?: number;
+  expiresIn?: number;
 }
 
 export class InviteApiError extends Error {
@@ -67,25 +73,32 @@ export function inviteApiUrl(value: string | null | undefined = import.meta.env.
 }
 
 export function normalizeUploadTicket(raw: unknown): UploadTicket {
-  const body = (raw ?? {}) as { url?: string; method?: string; headers?: Record<string, string>; fields?: Record<string, string> };
+  const body = (raw ?? {}) as {
+    url?: string;
+    method?: string;
+    headers?: Record<string, string>;
+    maxBytes?: number;
+    expiresIn?: number;
+  };
   if (!body.url) throw new InviteApiError(0, "The upload link was missing a URL.");
-  const method = body.method?.toUpperCase() === "POST" || body.fields ? "POST" : "PUT";
+  if (body.method && body.method.toUpperCase() !== "PUT") {
+    throw new InviteApiError(0, "This upload link is not a direct photo upload.");
+  }
   return {
-    method,
+    method: "PUT",
     url: body.url,
     headers: body.headers ?? {},
-    fields: body.fields ?? null,
+    maxBytes: body.maxBytes,
+    expiresIn: body.expiresIn,
   };
 }
 
-export function uploadRequest(ticket: UploadTicket, file: Blob): { url: string; method: "PUT" | "POST"; headers: Record<string, string>; body: Blob | FormData } {
-  if (ticket.method === "POST") {
-    const form = new FormData();
-    for (const [key, value] of Object.entries(ticket.fields ?? {})) form.append(key, value);
-    form.append("file", file, "photo.jpg");
-    return { url: ticket.url, method: "POST", headers: {}, body: form };
+/** PUT bytes with exactly the headers the server signed. Do not add or rewrite Content-Type. */
+export function uploadRequest(ticket: UploadTicket, file: Blob): { url: string; method: "PUT"; headers: Record<string, string>; body: Blob } {
+  if (ticket.maxBytes != null && file.size > ticket.maxBytes) {
+    throw new InviteApiError(0, "That photo is too large. Try a smaller one.");
   }
-  return { url: ticket.url, method: "PUT", headers: ticket.headers, body: file };
+  return { url: ticket.url, method: "PUT", headers: { ...ticket.headers }, body: file };
 }
 
 export interface InviteApi {
@@ -117,7 +130,8 @@ export function createInviteApi(baseUrl: string, fetchImpl: FetchLike = fetch): 
       }
     }
     if (!response.ok) {
-      throw new InviteApiError(response.status, payload.message || (response.status === 404 ? "This invite link has expired." : "The invite service could not complete that."));
+      const detail = payload.message || (payload as { error?: string }).error;
+      throw new InviteApiError(response.status, detail || (response.status === 404 ? "This invite link has expired." : "The invite service could not complete that."));
     }
     return payload;
   }
@@ -147,8 +161,13 @@ export function createInviteApi(baseUrl: string, fetchImpl: FetchLike = fetch): 
       if (Array.isArray(payload)) return payload;
       return payload.invites ?? [];
     },
-    deleteInvite(ownerKey, token) {
-      return request<void>(`/owner/invites/${encodeURIComponent(token)}`, { method: "DELETE" }, ownerKey);
+    async deleteInvite(ownerKey, token) {
+      const payload = await request<{ deleted?: boolean; token?: string }>(
+        `/owner/invites/${encodeURIComponent(token)}`,
+        { method: "DELETE" },
+        ownerKey,
+      );
+      if (payload && payload.deleted === false) throw new InviteApiError(0, "The server did not delete that invite.");
     },
   };
 }

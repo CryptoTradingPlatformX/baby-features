@@ -3,13 +3,14 @@ import type { Person } from "../types";
 import { uid } from "../types";
 import {
   createInviteApi,
+  InviteApiError,
   inviteApiUrl,
   readOwnerKey,
   writeOwnerKey,
   type InviteApi,
   type OwnerInvite,
 } from "../invites/api";
-import { filledSlots, inviteStatus, personForImport, suggestPerson, withImportedPhoto } from "../invites/importPlan";
+import { filledSlots, importPhotoUrls, inviteStatus, personForImport, suggestPerson, withImportedPhoto } from "../invites/importPlan";
 import { loadInviteRecords, publicUploadLink, saveInviteRecords, type InviteRecord } from "../invites/records";
 import { inviteMessage, smsHref } from "../invites/sms";
 import { canvasToBlob, releaseCanvas } from "../vision/imageutil";
@@ -59,6 +60,7 @@ export function InvitesScreen({
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [staleKey, setStaleKey] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const canShare = typeof navigator.share === "function";
@@ -69,8 +71,28 @@ export function InvitesScreen({
 
   useEffect(() => {
     if (!client || !readOwnerKey()) return;
-    void refresh(client, setRemote, setError);
+    void refresh(client, setRemote, noteFailure);
   }, [client]);
+
+  function noteFailure(reason: unknown) {
+    if (reason instanceof InviteApiError && reason.status === 401) {
+      setStaleKey(true);
+      setError("This phone's saved invite key isn't recognized. Start fresh to create new links. Older links stay on the server, but this phone can no longer check them.");
+      return;
+    }
+    setStaleKey(false);
+    setError(reason instanceof Error ? reason.message : "The invite service could not complete that.");
+  }
+
+  function startFresh() {
+    writeOwnerKey(null);
+    saveInviteRecords([]);
+    setRecords([]);
+    setRemote({});
+    setStaleKey(false);
+    setError(null);
+    setNotice("Started fresh. The next links use a new key.");
+  }
 
   function addDraft() {
     const trimmed = name.trim();
@@ -106,9 +128,9 @@ export function InvitesScreen({
       setRecords((current) => [...added, ...current]);
       setDrafts([]);
       setNotice("Invite links are ready. Text, share, or copy each one.");
-      await refresh(client, setRemote, setError);
+      await refresh(client, setRemote, noteFailure);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not create invites.");
+      noteFailure(reason);
     } finally {
       setBusy(null);
     }
@@ -126,18 +148,21 @@ export function InvitesScreen({
 
   async function importInvite(record: InviteRecord) {
     if (!client) return;
-    const remoteInvite = remote[record.token];
-    const slots = remoteInvite?.slots ?? {};
-    const angles = filledSlots(slots);
-    if (!angles.length) return;
     setBusy(record.token);
     setError(null);
     try {
+      const key = readOwnerKey();
+      if (!key) throw new Error("Create invite links on this phone before importing.");
+      const freshList = await client.listOwnerInvites(key);
+      const fresh = freshList.find((item) => item.token === record.token);
+      const urls = importPhotoUrls(fresh ?? {});
+      const angles = (Object.keys(urls) as (keyof typeof urls)[]).filter((angle) => urls[angle]);
+      if (!angles.length) throw new Error("No photos are ready. Check for photos and import right away.");
       const choice = targets[record.token] || suggestPerson(family, record)?.id || "create";
       let person = personForImport(family, record, choice);
       const vision = await import("../vision/analyze");
       for (const angle of angles) {
-        const url = slots[angle];
+        const url = urls[angle];
         if (!url) continue;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Could not download the ${angle} photo.`);
@@ -153,8 +178,7 @@ export function InvitesScreen({
         releaseCanvas(analyzed.canvas);
         await onSave(person);
       }
-      const key = readOwnerKey();
-      if (key) await client.deleteInvite(key, record.token);
+      await client.deleteInvite(key, record.token);
       setRecords((current) => current.filter((item) => item.token !== record.token));
       setRemote((current) => {
         const next = { ...current };
@@ -163,7 +187,7 @@ export function InvitesScreen({
       });
       setNotice(`${record.name}'s photos are on this phone and were removed from the server.`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not import those photos.");
+      noteFailure(reason);
     } finally {
       setBusy(null);
     }
@@ -178,7 +202,7 @@ export function InvitesScreen({
       if (key) await client.deleteInvite(key, token);
       setRecords((current) => current.filter((item) => item.token !== token));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not revoke that invite.");
+      noteFailure(reason);
     } finally {
       setBusy(null);
     }
@@ -198,7 +222,16 @@ export function InvitesScreen({
       <p className="lede">
         Each person gets their own link to add a front photo and both sides. Texts are sent by your phone, not by a server.
       </p>
-      {error ? <p className="issue error">{error}</p> : null}
+      {error ? (
+        <div className="issue error retry-banner">
+          <p>{error}</p>
+          {staleKey ? (
+            <button className="btn secondary" type="button" data-testid="start-fresh" onClick={startFresh}>
+              Start fresh
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {notice ? <p className="issue">{notice}</p> : null}
 
       <form
@@ -267,7 +300,7 @@ export function InvitesScreen({
           type="button"
           data-testid="refresh-invites"
           disabled={busy != null}
-          onClick={() => client && void refresh(client, setRemote, setError)}
+          onClick={() => client && void refresh(client, setRemote, noteFailure)}
         >
           Check for photos
         </button>
@@ -277,7 +310,7 @@ export function InvitesScreen({
         {records.map((record) => {
           const info = remote[record.token];
           const status = inviteStatus(info?.slots, info?.status);
-          const ready = filledSlots(info?.slots).length > 0;
+          const ready = status !== "expired" && (filledSlots(info?.slots).length > 0 || Object.keys(importPhotoUrls(info ?? {})).length > 0);
           const message = inviteMessage({ name: record.name, babyName, link: record.link });
           const suggested = suggestPerson(family, record)?.id ?? "create";
           return (
@@ -350,7 +383,7 @@ export function InvitesScreen({
 async function refresh(
   client: InviteApi,
   setRemote: (value: Record<string, OwnerInvite>) => void,
-  setError: (value: string | null) => void,
+  onError: (reason: unknown) => void,
 ) {
   const key = readOwnerKey();
   if (!key) return;
@@ -360,6 +393,6 @@ async function refresh(
     for (const invite of list) next[invite.token] = invite;
     setRemote(next);
   } catch (reason) {
-    setError(reason instanceof Error ? reason.message : "Could not check for photos.");
+    onError(reason);
   }
 }

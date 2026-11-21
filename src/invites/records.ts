@@ -6,7 +6,7 @@ export interface InviteRecord {
   role: string;
   phone?: string;
   link: string;
-  expiresAt?: string;
+  expiresAt?: string | number;
 }
 
 export function loadInviteRecords(): InviteRecord[] {
