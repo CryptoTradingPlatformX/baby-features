@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { appearanceFromBackup, peopleFromBackup, peopleToBackup } from "./backup";
+import { appearanceFromBackup, ownerKeyFromBackup, peopleFromBackup, peopleToBackup } from "./backup";
 import { clearPeople, deletePerson, loadPeople, savePerson } from "./db";
 import { countPhotosToRebuild, migratePeople, type MigrateProgress } from "./migrate";
 import {
@@ -13,6 +13,7 @@ import {
   type MigrationView,
 } from "./migrationFlow";
 import { requestPersistentStorage } from "./persist";
+import { readOwnerKey, writeOwnerKey } from "./invites/api";
 import { applyAppearance, readAppearance } from "./theme";
 import { SCHEMA_VERSION, type Person } from "./types";
 
@@ -143,7 +144,7 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         await rebuild(people, true);
       },
       async exportBackup() {
-        const backup = await peopleToBackup(people, readAppearance());
+        const backup = await peopleToBackup(people, readAppearance(), readOwnerKey());
         const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -157,6 +158,8 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
         const imported = await peopleFromBackup(text);
         const look = appearanceFromBackup(text);
         if (look) applyAppearance(look);
+        const ownerKey = ownerKeyFromBackup(text);
+        if (ownerKey) writeOwnerKey(ownerKey);
         for (const person of imported) await savePerson(person);
         const merged = mergePeople(people, imported);
         await rebuild(merged, false);

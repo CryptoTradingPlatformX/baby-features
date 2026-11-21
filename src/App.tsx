@@ -2,9 +2,13 @@ import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { CaptureScreen } from "./components/CaptureScreen";
 import { FamilyScreen } from "./components/FamilyScreen";
 import { FeatureScreen } from "./components/FeatureScreen";
+import { GuestUpload } from "./components/GuestUpload";
 import { HomeScreen } from "./components/HomeScreen";
+import { InvitesScreen } from "./components/InvitesScreen";
 import { ResultsScreen } from "./components/ResultsScreen";
 import { ThemePicker } from "./components/ThemePicker";
+import { inviteApiUrl } from "./invites/api";
+import { uploadTokenFromHash } from "./invites/sms";
 import { PeopleProvider, usePeople } from "./state";
 import { uid, type Person } from "./types";
 
@@ -13,9 +17,31 @@ type Screen =
   | { name: "capture"; personId: string; after: "features" | "family" }
   | { name: "features" }
   | { name: "family" }
+  | { name: "invites" }
   | { name: "results" };
 
+function useUploadToken(): string | null {
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  return uploadTokenFromHash(hash);
+}
+
 export function App() {
+  const token = useUploadToken();
+  if (token) {
+    return (
+      <ErrorBoundary>
+        <div className="app">
+          <ThemePicker />
+          <GuestUpload token={token} />
+        </div>
+      </ErrorBoundary>
+    );
+  }
   return (
     <PeopleProvider>
       <ErrorBoundary>
@@ -79,6 +105,8 @@ function Shell() {
           onRerun={() => void store.rerun()}
           onExport={() => void store.exportBackup()}
           onImport={(file) => void store.importBackup(file)}
+          invitesEnabled={inviteApiUrl() != null}
+          onInvites={() => setScreen({ name: "invites" })}
           busy={store.migration != null}
           persisted={store.persisted}
           onReset={() =>
@@ -131,6 +159,10 @@ function Shell() {
           }}
           onCompare={() => setScreen({ name: "results" })}
         />
+      ) : null}
+
+      {screen.name === "invites" ? (
+        <InvitesScreen babyName={store.baby?.name} family={store.family} onBack={() => setScreen({ name: "home" })} onSave={store.save} />
       ) : null}
 
       {screen.name === "results" && store.baby ? (
