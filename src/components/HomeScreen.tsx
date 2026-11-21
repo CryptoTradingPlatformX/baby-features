@@ -14,6 +14,8 @@ export function HomeScreen({
   onRerun,
   onExport,
   onImport,
+  invitesEnabled,
+  onInvites,
   busy,
   persisted,
 }: {
@@ -28,6 +30,8 @@ export function HomeScreen({
   onRerun: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
+  invitesEnabled: boolean;
+  onInvites: () => void;
   busy: boolean;
   persisted: boolean | null;
 }) {
@@ -94,6 +98,11 @@ export function HomeScreen({
           />
         </label>
       </div>
+      {invitesEnabled ? (
+        <button className="btn secondary wide" type="button" data-testid="open-invites" onClick={onInvites}>
+          Family invites
+        </button>
+      ) : null}
       <p className="note">
         {persisted
           ? "This browser was asked to keep the saved photos."

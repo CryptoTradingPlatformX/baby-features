@@ -1,3 +1,4 @@
+import { readOwnerKey } from "./invites/api";
 import { parseAppearance, readAppearance, type Appearance } from "./theme";
 import { SCHEMA_VERSION, type Angle, type Person, type StoredPhoto } from "./types";
 
@@ -24,19 +25,37 @@ export interface BackupFile {
   exportedAt: string;
   /** Chosen skin, including "system". Missing on backups from before themes. */
   appearance?: Appearance;
+  /** Key for family photo invites. Missing on older backups. */
+  ownerKey?: string;
   people: BackupPerson[];
 }
 
 const ANGLES: Angle[] = ["front", "left", "right"];
 
-export async function peopleToBackup(people: Person[], appearance: Appearance = readAppearance()): Promise<BackupFile> {
+export async function peopleToBackup(
+  people: Person[],
+  appearance: Appearance = readAppearance(),
+  ownerKey: string | null = readOwnerKey(),
+): Promise<BackupFile> {
   return {
     app: "baby-features",
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     appearance: parseAppearance(appearance),
+    ...(ownerKey ? { ownerKey } : {}),
     people: await Promise.all(people.map(backupPerson)),
   };
+}
+
+export function ownerKeyFromBackup(raw: string): string | null {
+  let parsed: Partial<BackupFile>;
+  try {
+    parsed = JSON.parse(raw) as Partial<BackupFile>;
+  } catch {
+    return null;
+  }
+  if (parsed.app !== "baby-features") return null;
+  return typeof parsed.ownerKey === "string" && parsed.ownerKey ? parsed.ownerKey : null;
 }
 
 /** Null when the file has no theme, so a restore leaves the current skin alone. */

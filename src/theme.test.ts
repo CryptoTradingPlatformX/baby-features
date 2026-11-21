@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { peopleToBackup } from "./backup";
-import { appearanceFromBackup } from "./backup";
+import { appearanceFromBackup, ownerKeyFromBackup, peopleToBackup } from "./backup";
 import {
   applyAppearance,
   DEFAULT_APPEARANCE,
@@ -59,6 +58,10 @@ describe("appearance", () => {
     const without = { ...backup, appearance: undefined };
     expect(appearanceFromBackup(JSON.stringify(without))).toBeNull();
     expect(appearanceFromBackup(JSON.stringify({ ...backup, appearance: "nope" }))).toBe("clarity");
+    const withKey = await peopleToBackup([], "clarity", "owner-key");
+    expect(withKey.ownerKey).toBe("owner-key");
+    expect(ownerKeyFromBackup(JSON.stringify(withKey))).toBe("owner-key");
+    expect(ownerKeyFromBackup(JSON.stringify(backup))).toBeNull();
   });
 
   it("sets the theme in index.html before the app script", () => {
