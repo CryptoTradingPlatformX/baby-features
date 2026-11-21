@@ -128,17 +128,17 @@ function count(person: Person): number {
 function Hero() {
   return (
     <svg className="hero" viewBox="0 0 320 180" role="img" aria-label="A simple baby face with ears, eyes, and a smile">
-      <rect x="0" y="0" width="320" height="180" rx="28" fill="#fff" />
-      <ellipse cx="78" cy="92" rx="16" ry="24" fill="#f6c1b0" />
-      <ellipse cx="242" cy="92" rx="16" ry="24" fill="#f6c1b0" />
-      <ellipse cx="160" cy="96" rx="70" ry="62" fill="#ffd7c8" />
-      <ellipse cx="134" cy="90" rx="10" ry="12" fill="#fff" />
-      <ellipse cx="186" cy="90" rx="10" ry="12" fill="#fff" />
-      <circle cx="136" cy="92" r="5" fill="#5c4034" />
-      <circle cx="188" cy="92" r="5" fill="#5c4034" />
-      <path d="M148 118 q12 12 24 0" fill="none" stroke="#c85a45" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="122" cy="110" r="7" fill="#f3b0a4" opacity="0.7" />
-      <circle cx="198" cy="110" r="7" fill="#f3b0a4" opacity="0.7" />
+      <rect className="hero-card" x="0" y="0" width="320" height="180" rx="28" />
+      <ellipse className="hero-blush" cx="78" cy="92" rx="16" ry="24" />
+      <ellipse className="hero-blush" cx="242" cy="92" rx="16" ry="24" />
+      <ellipse className="hero-skin" cx="160" cy="96" rx="70" ry="62" />
+      <ellipse className="hero-eye" cx="134" cy="90" rx="10" ry="12" />
+      <ellipse className="hero-eye" cx="186" cy="90" rx="10" ry="12" />
+      <circle className="hero-pupil" cx="136" cy="92" r="5" />
+      <circle className="hero-pupil" cx="188" cy="92" r="5" />
+      <path className="hero-smile" d="M148 118 q12 12 24 0" fill="none" strokeWidth="3" strokeLinecap="round" />
+      <circle className="hero-cheek" cx="122" cy="110" r="7" opacity="0.7" />
+      <circle className="hero-cheek" cx="198" cy="110" r="7" opacity="0.7" />
     </svg>
   );
 }
